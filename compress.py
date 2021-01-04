@@ -155,6 +155,7 @@ def main(args):
                                    weight_decay=args.arch_weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, float(epochs), eta_min=args.learning_rate_min)
+    scheduler_a = torch.optim.lr_scheduler.StepLR(optimizer_a, 30, gamma=0.2)
 
     train_epoch_record = -1
     arch_train_count = 0
@@ -219,6 +220,8 @@ def main(args):
             train_acc, train_obj = train(train_queue, valid_queue, model, network_params, criterion, optimizer,
                                          optimizer_a, lr, train_arch=True)
             arch_train_count += 1
+
+            scheduler_a.step()
 
         scheduler.step()
         logging.info('Train_acc %f, Objs: %e', train_acc, train_obj)
