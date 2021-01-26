@@ -19,7 +19,6 @@ from genotypes import PRIMITIVES
 from genotypes import Genotype
 from genotypes import op_graph
 
-
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--workers', type=int, default=2, help='number of workers to load dataset')
 parser.add_argument('--batch_size', type=int, default=96, help='batch size')
@@ -41,7 +40,6 @@ parser.add_argument('--arch_learning_rate', type=float, default=6e-4, help='lear
 parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
 parser.add_argument('--note', type=str, default='try', help='note for this run')
 parser.add_argument('--eps_no_archs', type=int, default=15, help='epochs to do not train arch params')
-parser.add_argument('--num_classes', type=int)
 parser.add_argument('--train_data_dir', type=str, help='train data dir')
 parser.add_argument('--test_data_dir', type=str, help='test data dir')
 parser.add_argument('--inter_nodes', type=int, default=4)
@@ -52,26 +50,27 @@ parser.add_argument('--arch', type=str)
 parser.add_argument('--cifar100', action='store_true', default=False, help='search with cifar100 dataset')
 
 args = parser.parse_args()
-if os.path.isdir(args.save)==False:
-    os.makedirs(args.save)
-args.save = '{}compress-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
-utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
 
-log_format = '%(asctime)s %(message)s'
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                    format=log_format, datefmt='%m/%d %I:%M:%S %p')
-fh = logging.FileHandler(os.path.join(args.save, 'log.txt'))
-fh.setFormatter(logging.Formatter(log_format))
-logging.getLogger().addHandler(fh)
 
-if args.cifar100:
-    CIFAR_CLASSES = 100
-    data_folder = 'cifar-100-python'
-else:
-    CIFAR_CLASSES = 10
-    data_folder = 'cifar-10-batches-py'
+def model_compress(args):
+    if os.path.isdir(args.save) == False:
+        os.makedirs(args.save)
+    save_dir = '{}compress-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
+    utils.create_exp_dir(save_dir, scripts_to_save=glob.glob('*.py'))
 
-def main(args):
+    log_format = '%(asctime)s %(message)s'
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format=log_format, datefmt='%m/%d %I:%M:%S %p')
+    fh = logging.FileHandler(os.path.join(save_dir, 'log.txt'))
+    fh.setFormatter(logging.Formatter(log_format))
+    logging.getLogger().addHandler(fh)
+
+    if args.cifar100:
+        CIFAR_CLASSES = 100
+        data_folder = 'cifar-100-python'
+    else:
+        CIFAR_CLASSES = 10
+        data_folder = 'cifar-10-batches-py'
 
     if not torch.cuda.is_available():
         logging.info('No GPU device available')
@@ -123,7 +122,6 @@ def main(args):
         sampler=torch.utils.data.sampler.RandomSampler(valid_set),
         pin_memory=True, num_workers=args.workers)
 
-
     # build Network
     criterion = nn.CrossEntropyLoss()
     criterion = criterion.cuda()
@@ -131,7 +129,10 @@ def main(args):
     eps_no_arch = args.eps_no_archs
     epochs = args.epochs
 
-    genotype = eval("genotypes.%s" % args.arch)
+    if args.arch in genotypes.__dict__.keys():
+        genotype = eval("genotypes.%s" % args.arch)
+    else:
+        genotype = eval(args.arch)
 
     model = Network(genotype, args.init_channels, CIFAR_CLASSES, args.layers, criterion,
                     steps=args.inter_nodes, multiplier=args.inter_nodes,
@@ -155,6 +156,7 @@ def main(args):
                                    weight_decay=args.arch_weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, float(epochs), eta_min=args.learning_rate_min)
+
     scheduler_a = torch.optim.lr_scheduler.StepLR(optimizer_a, 30, gamma=0.2)
 
     train_epoch_record = -1
@@ -243,7 +245,7 @@ def main(args):
         #     if epoch >= train_epoch_record + arch_train_num:
         #         break
 
-        utils.save(model, os.path.join(args.save, 'weights.pt'))
+        utils.save(model, os.path.join(save_dir, 'weights.pt'))
 
     # last geno parser
     ops, probs = compressing_parse(model)
@@ -253,6 +255,9 @@ def main(args):
         reduce=ops[1], reduce_concat=concat,
     )
     logging.info('Last geno: %s', genotype)
+
+    if result_geno == None:
+        result_geno = genotype
 
     return result_geno, best_arch_stable
 
@@ -336,6 +341,7 @@ def ranking(prob):
 
     return rank
 
+
 # network parsing
 
 def compressing_parse(model):
@@ -367,7 +373,7 @@ def compressing_parse(model):
 if __name__ == '__main__':
     start_time = time.time()
 
-    result_geno, best_arch_stable = main(args)
+    result_geno, best_arch_stable = model_compress(args)
 
     logging.info('arch stable: %d', best_arch_stable)
     logging.info('result genotype: %s', result_geno)

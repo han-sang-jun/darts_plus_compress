@@ -12,9 +12,8 @@ import genotypes
 import torch.utils
 import torchvision.datasets as dset
 import torch.backends.cudnn as cudnn
-
+from genotypes import Genotype
 from model import NetworkCIFAR as Network
-
 
 parser = argparse.ArgumentParser("cifar")
 parser.add_argument('--workers', type=int, default=4, help='number of workers')
@@ -40,39 +39,45 @@ parser.add_argument('--note', type=str, default='try', help='note for this run')
 parser.add_argument('--cifar100', action='store_true', default=False, help='if use cifar100')
 
 args, unparsed = parser.parse_known_args()
-if os.path.isdir(args.save)==False:
-    os.makedirs(args.save)
-args.save = '{}eval-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
-utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
 
-log_format = '%(asctime)s %(message)s'
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-    format=log_format, datefmt='%m/%d %I:%M:%S %p')
-fh = logging.FileHandler(os.path.join(args.save, 'log.txt'))
-fh.setFormatter(logging.Formatter(log_format))
-logging.getLogger().addHandler(fh)
 
-if args.cifar100:
-    CIFAR_CLASSES = 100
-    data_folder = 'cifar-100-python'
-else:
-    CIFAR_CLASSES = 10
-    data_folder = 'cifar-10-batches-py'
+def train_model(args):
+    if os.path.isdir(args.save) == False:
+        os.makedirs(args.save)
+    save_dir = '{}eval-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
+    utils.create_exp_dir(save_dir, scripts_to_save=glob.glob('*.py'))
 
-def main():
+    log_format = '%(asctime)s %(message)s'
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format=log_format, datefmt='%m/%d %I:%M:%S %p')
+    fh = logging.FileHandler(os.path.join(save_dir, 'log.txt'))
+    fh.setFormatter(logging.Formatter(log_format))
+    logging.getLogger().addHandler(fh)
+
+    if args.cifar100:
+        CIFAR_CLASSES = 100
+        data_folder = 'cifar-100-python'
+    else:
+        CIFAR_CLASSES = 10
+        data_folder = 'cifar-10-batches-py'
+
     if not torch.cuda.is_available():
         logging.info('No GPU device available')
         sys.exit(1)
     np.random.seed(args.seed)
     cudnn.benchmark = True
     torch.manual_seed(args.seed)
-    cudnn.enabled=True
+    cudnn.enabled = True
     torch.cuda.manual_seed(args.seed)
     logging.info("args = %s", args)
     logging.info("unparsed args = %s", unparsed)
     num_gpus = torch.cuda.device_count()
-    
-    genotype = eval("genotypes.%s" % args.arch)
+
+    if args.arch in genotypes.__dict__.keys():
+        genotype = eval("genotypes.%s" % args.arch)
+    else:
+        genotype = eval(args.arch)
+
     print('---------Genotype---------')
     logging.info(genotype)
     print('--------------------------')
@@ -88,7 +93,7 @@ def main():
         args.learning_rate,
         momentum=args.momentum,
         weight_decay=args.weight_decay
-        )
+    )
 
     if args.cifar100:
         train_transform, valid_transform = utils._data_transforms_cifar100(args)
@@ -124,8 +129,9 @@ def main():
         logging.info('Best_acc: %f', best_acc)
         end_time = time.time()
         duration = end_time - start_time
-        print('Epoch time: %ds.' % duration )
-        utils.save(model.module, os.path.join(args.save, 'weights.pt'))
+        print('Epoch time: %ds.' % duration)
+        utils.save(model.module, os.path.join(save_dir, 'weights.pt'))
+
 
 def train(train_queue, model, criterion, optimizer):
     objs = utils.AvgrageMeter()
@@ -141,12 +147,12 @@ def train(train_queue, model, criterion, optimizer):
         loss = criterion(logits, target)
         if args.auxiliary:
             loss_aux = criterion(logits_aux, target)
-            loss += args.auxiliary_weight*loss_aux
+            loss += args.auxiliary_weight * loss_aux
         loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
         optimizer.step()
 
-        prec1, _ = utils.accuracy(logits, target, topk=(1,5))
+        prec1, _ = utils.accuracy(logits, target, topk=(1, 5))
         n = input.size(0)
         objs.update(loss.data.item(), n)
         top1.update(prec1.data.item(), n)
@@ -169,7 +175,7 @@ def infer(valid_queue, model, criterion):
             logits, _ = model(input)
             loss = criterion(logits, target)
 
-        prec1, _ = utils.accuracy(logits, target, topk=(1,5))
+        prec1, _ = utils.accuracy(logits, target, topk=(1, 5))
         n = input.size(0)
         objs.update(loss.data.item(), n)
         top1.update(prec1.data.item(), n)
@@ -182,8 +188,8 @@ def infer(valid_queue, model, criterion):
 
 if __name__ == '__main__':
     start_time = time.time()
-    main() 
+    train_model(args)
     end_time = time.time()
     duration = end_time - start_time
     logging.info('Eval time: %ds.', duration)
-    
+

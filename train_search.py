@@ -40,34 +40,35 @@ parser.add_argument('--note', type=str, default='try', help='note for this run')
 parser.add_argument('--eps_no_archs', type=int, default=15, help='epochs to do not train arch params')
 parser.add_argument('--train_data_dir', type=str, help='train data dir')
 parser.add_argument('--test_data_dir', type=str, help='test data dir')
-parser.add_argument('--inter_nodes', type = int, default = 4)
-parser.add_argument('--stem_multiplier', type = int, default = 3)
+parser.add_argument('--inter_nodes', type=int, default=4)
+parser.add_argument('--stem_multiplier', type=int, default=3)
 parser.add_argument('--stable_arch', type=int, default=5)
 parser.add_argument('--residual_connection', type=bool, default=False)
 parser.add_argument('--cifar100', action='store_true', default=False, help='search with cifar100 dataset')
 
 args = parser.parse_args()
-if os.path.isdir(args.save)==False:
-    os.makedirs(args.save)
-args.save = '{}search-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
-utils.create_exp_dir(args.save, scripts_to_save=glob.glob('*.py'))
-
-log_format = '%(asctime)s %(message)s'
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-    format=log_format, datefmt='%m/%d %I:%M:%S %p')
-fh = logging.FileHandler(os.path.join(args.save, 'log.txt'))
-fh.setFormatter(logging.Formatter(log_format))
-logging.getLogger().addHandler(fh)
-
-if args.cifar100:
-    CIFAR_CLASSES = 100
-    data_folder = 'cifar-100-python'
-else:
-    CIFAR_CLASSES = 10
-    data_folder = 'cifar-10-batches-py'
 
 
-def main(args):
+def model_search(args):
+    if os.path.isdir(args.save) == False:
+        os.makedirs(args.save)
+    save_dir = '{}search-{}-{}'.format(args.save, args.note, time.strftime("%Y%m%d-%H%M%S"))
+    utils.create_exp_dir(save_dir, scripts_to_save=glob.glob('*.py'))
+
+    log_format = '%(asctime)s %(message)s'
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                        format=log_format, datefmt='%m/%d %I:%M:%S %p')
+    fh = logging.FileHandler(os.path.join(save_dir, 'log.txt'))
+    fh.setFormatter(logging.Formatter(log_format))
+    logging.getLogger().addHandler(fh)
+
+    if args.cifar100:
+        CIFAR_CLASSES = 100
+        data_folder = 'cifar-100-python'
+    else:
+        CIFAR_CLASSES = 10
+        data_folder = 'cifar-10-batches-py'
+
     if not torch.cuda.is_available():
         logging.info('No GPU device available')
         sys.exit(1)
@@ -148,6 +149,7 @@ def main(args):
                                    weight_decay=args.arch_weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, float(epochs), eta_min=args.learning_rate_min)
+    scheduler_a = torch.optim.lr_scheduler.StepLR(optimizer_a, 30, gamma=0.2)
 
     train_epoch_record = -1
     arch_train_count = 0
@@ -219,6 +221,8 @@ def main(args):
 
             arch_train_count += 1
 
+            scheduler_a.step()
+
         scheduler.step()
         logging.info('Train_acc %f, Objs: %e', train_acc, train_obj)
         epoch_duration = time.time() - epoch_start
@@ -239,7 +243,7 @@ def main(args):
         #     if epoch >= train_epoch_record + arch_train_num:
         #         break
 
-        utils.save(model, os.path.join(args.save, 'weights.pt'))
+        utils.save(model, os.path.join(save_dir, 'weights.pt'))
 
     # last geno parser
     ops, probs = parse_ops_without_none(model)
@@ -255,6 +259,9 @@ def main(args):
         reduce=parsed_ops[1], reduce_concat=concat,
     )
     logging.info('Last geno: %s', genotype)
+
+    if result_geno == None:
+        result_geno = genotype
 
     return result_geno, best_arch_stable
 
@@ -386,7 +393,7 @@ def parse_ops_without_none(model):
 if __name__ == '__main__':
     start_time = time.time()
 
-    result_geno, best_arch_stable = main(args)
+    result_geno, best_arch_stable = model_search(args)
 
     logging.info('arch stable: %d', best_arch_stable)
     logging.info('result genotype: %s', result_geno)
